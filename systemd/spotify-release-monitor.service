@@ -1,0 +1,8 @@
+[Unit]
+Description=Update the My New Releases Spotify playlist
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/spotify-release-monitor
+ExecStart=/usr/bin/python3 %h/spotify-release-monitor/release_monitor.py
+UMask=0077
