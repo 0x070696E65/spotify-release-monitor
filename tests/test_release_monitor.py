@@ -23,8 +23,8 @@ def page(*items, next_path=None):
     return {"items": list(items), "next": API + next_path if next_path else None}
 
 
-def album(identifier, days_ago):
-    return {"id": identifier, "album_type": "single", "release_date_precision": "day",
+def album(identifier, days_ago, *, album_type="single"):
+    return {"id": identifier, "album_type": album_type, "release_date_precision": "day",
             "release_date": (TODAY - timedelta(days=days_ago)).isoformat()}
 
 
@@ -69,7 +69,22 @@ class ReleaseMonitorTests(unittest.TestCase):
         self.assertEqual([item.args[1] for item in spotify.call.call_args_list], list(responses))
         for identifier in ("A", "B"):
             spotify.call.assert_any_call("GET", f"/artists/{identifier}/albums",
-                                         params={"include_groups": "album,single", "limit": 10})
+                                         params={"include_groups": "single", "limit": 10})
+
+    def test_only_singles_are_expanded_and_all_eligible_tracks_are_collected(self):
+        spotify = self.make_spotify()
+        responses = {
+            "/me/following": {"artists": page({"id": "A"})},
+            "/artists/A/albums": page(album("Album", 0, album_type="album"),
+                                     album("Compilation", 0, album_type="compilation"), album("Single", 1)),
+            "/albums/Single/tracks": page(track("First"), track("Unfollowed", "B"), track("Second", "A", "B")),
+        }
+        spotify.call = Mock(side_effect=lambda method, path, **kwargs: responses[path])
+
+        tracks = collect_tracks(spotify, TODAY)
+
+        self.assertEqual([item.title for item in tracks], ["First", "Second"])
+        self.assertEqual([entry.args[1] for entry in spotify.call.call_args_list], list(responses))
 
     def test_default_limit_is_fifty(self):
         spotify = self.make_spotify()

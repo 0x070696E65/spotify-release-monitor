@@ -60,13 +60,13 @@ def collect_tracks(spotify, today, *, lookback_days=DEFAULT_LOOKBACK_DAYS, max_t
     imprecise_dates = 0
     for artist_id in sorted(artists):
         page = spotify.call("GET", f"/artists/{artist_id}/albums", params={
-            "include_groups": "album,single", "limit": 10,
+            "include_groups": "single", "limit": 10,
         })
         if not isinstance(page.get("items"), list):
             raise MonitorError("Spotify のページにリリースの一覧がありません。")
         for album in page["items"][:10]:
             album_id = album["id"]
-            if album_id in seen_albums or album["album_type"] not in {"album", "single"}:
+            if album_id in seen_albums or album["album_type"] != "single":
                 continue
             seen_albums.add(album_id)
             if album["release_date_precision"] != "day":

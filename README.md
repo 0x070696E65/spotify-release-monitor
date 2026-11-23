@@ -1,6 +1,6 @@
 # Spotify Release Monitor
 
-Spotify でフォローしているアーティストの新曲を集め、非公開プレイリスト「My New Releases」を更新する Python CLI です。Python 3.10 以上と OS のタイムゾーンデータを使います。外部 Python パッケージのインストールは不要です。
+Spotify でフォローしているアーティストの新着シングルから曲を集め、非公開プレイリスト「My New Releases」を更新する Python CLI です。Python 3.10 以上と OS のタイムゾーンデータを使います。外部 Python パッケージのインストールは不要です。
 
 ## Spotify Developer Dashboard の設定
 
@@ -44,7 +44,7 @@ python3 release_monitor.py
 
 どちらも1以上の整数を指定します。未設定または空欄の場合はデフォルトを使います。
 
-- フォロー中の全アーティストを取得し、各アーティストのシングルとアルバムを `album,single` の先頭1ページ（最大10件）まで調べます。客演枠の `appears_on` は対象外です。日単位の発売日が設定され、フォロー中のアーティストが1組以上クレジットされている曲を対象とします。 [Spotify のアーティスト別リリース API](https://developer.spotify.com/documentation/web-api/reference/get-an-artists-albums)
+- フォロー中の全アーティストを取得し、各アーティストのリリースを `include_groups=single` の先頭1ページ（最大10件）まで調べます。日単位の発売日が設定され、`album_type=single` のリリースが対象です。複数曲入りのシングルでは、フォロー中のアーティストが1組以上クレジットされている収録曲をすべて候補にします。 [Spotify のアーティスト別リリース API](https://developer.spotify.com/documentation/web-api/reference/get-an-artists-albums)
 - 取得範囲内で発売日の新しい順に曲を調べ、トラック URI が同じ曲、または正規化した曲名とクレジットされたアーティスト ID の集合が一致する曲を重複として扱います。曲名の比較では Unicode の表記幅、大文字・小文字、空白の差を吸収します。同日のリリースはリリース ID 順、同じリリース内は Spotify が返す曲順です。重複排除後の `MAX_TRACKS` 曲（既定で50曲）に達した時点で取得を打ち切ります。`--dry-run` にも同じ曲が表示されます。
 - アルバムの曲一覧をページ単位で `.album-tracks-cache.json` に48時間キャッシュし、有効なページは再取得せずに再利用します。`--dry-run` でもキャッシュを使います。このファイルは Git 管理対象外です。ローカルの Spotify 認証情報が変わると再利用範囲も切り替わります。収集中に Spotify がリフレッシュトークンを更新した場合は、同じ認証のキャッシュを引き継ぎます。
 - 収集に失敗すると、既存のプレイリストを維持して終了コード `1` を返します。収集が成功して対象が0曲の場合、プレイリストは空になります。終了時に API の合計回数と、HTTP メソッド・エンドポイント別の回数をログに記録します。トークン取得、失敗したリクエスト、再試行も集計に含まれます。
