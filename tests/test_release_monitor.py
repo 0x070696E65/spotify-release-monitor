@@ -11,7 +11,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 from album_track_cache import AlbumTrackCache, CACHE_FILENAME, CACHE_TTL_SECONDS
-from release_monitor import ReleaseTrack, collect_tracks, main, run, sync_playlist
+from release_monitor import ReleaseTrack, TitleExclusions, collect_tracks, main, normalize_title, run, sync_playlist
 from spotify_api import API, ApiError, MonitorError, Settings, Spotify
 
 
@@ -38,6 +38,18 @@ def release_track(identifier):
 
 
 class ReleaseMonitorTests(unittest.TestCase):
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.keywords_path = Path(directory.name) / "exclude_keywords.json"
+        self.write_keywords([])
+        config_patch = patch("release_monitor.EXCLUDE_KEYWORDS_PATH", self.keywords_path)
+        config_patch.start()
+        self.addCleanup(config_patch.stop)
+
+    def write_keywords(self, keywords):
+        self.keywords_path.write_text(json.dumps({"exclude_keywords": keywords}, ensure_ascii=False), encoding="utf-8")
+
     def make_spotify(self, settings=""):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -85,6 +97,101 @@ class ReleaseMonitorTests(unittest.TestCase):
 
         self.assertEqual([item.title for item in tracks], ["First", "Second"])
         self.assertEqual([entry.args[1] for entry in spotify.call.call_args_list], list(responses))
+
+    def test_title_exclusion_matches_normalized_literals_and_word_boundaries(self):
+        self.write_keywords(["Instrumental", "インスト", "Live", "ライブ", "Remix", "リミックス",
+                             "Karaoke", "カラオケ", "Off Vocal", "Acoustic Version", "Radio [Edit]+"])
+        exclusions = TitleExclusions(self.keywords_path, dry_run=False)
+        cases = {
+            "Running Wheel (Instrumental)": True, "Running Wheel": False,
+            "Song - Live Version": True, "Song - Live at the Hall": True,
+            "Song (Live)": True, "Song - Live": True, "Alive": False, "Lively": False,
+            "Song (Remix)": True, "Song（ライブ）": True, "曲のﾗｲﾌﾞ版": True,
+            "Song - Acoustic Version": True, "Song - OFF VOCAL": True,
+            "Song - ＯＦＦ\t ＶＯＣＡＬ": True, "Song - Radio [Edit]+": True, "Song - Radio E": False,
+        }
+        for title, expected in cases.items():
+            with self.subTest(title=title):
+                self.assertEqual(exclusions.excludes(normalize_title(title), title=title, artists="A"), expected)
+
+    def test_keyword_edits_are_applied_to_cached_tracks_on_each_run(self):
+        spotify = self.make_spotify()
+        responses = {
+            "/me/following": {"artists": page({"id": "A"})},
+            "/artists/A/albums": page(album("New", 0)),
+            "/albums/New/tracks": page(track("Live", name="Song (Live)"), track("Remix", name="Song (Remix)")),
+        }
+        spotify.call = Mock(side_effect=lambda method, path, **kwargs: responses[path])
+        with patch("release_monitor.datetime") as now, patch("release_monitor.sync_playlist") as sync:
+            now.now.return_value.date.return_value = TODAY
+            for keywords, expected in ((["Live"], ["Remix"]), (["Remix"], ["Live"]), ([], ["Live", "Remix"])):
+                with self.subTest(keywords=keywords), redirect_stdout(StringIO()) as stdout:
+                    self.write_keywords(keywords)
+                    run(spotify, dry_run=True)
+                    self.assertEqual([line.rsplit("/", 1)[-1] for line in stdout.getvalue().splitlines()], expected)
+            sync.assert_not_called()
+            self.write_keywords(["Live", "Remix"])
+            run(spotify, dry_run=False)
+            sync.assert_called_once_with(spotify, [])
+        album_calls = [entry for entry in spotify.call.call_args_list if entry.args[1] == "/albums/New/tracks"]
+        self.assertEqual(len(album_calls), 1)
+
+    def test_bad_keyword_configuration_exits_before_spotify_calls_or_writes(self):
+        spotify = self.make_spotify("SPOTIFY_PLAYLIST_ID=Target\n")
+        cases = (
+            (None, "見つかりません"), ('{"exclude_keywords":', "JSON が不正"),
+            ('{"exclude_keywords": [], "other": NaN}', "JSON が不正"),
+            ('{"exclude_keywords": "Live"}', "文字列の配列"), ("{}", "文字列の配列"),
+            ('{"exclude_keywords": [12]}', "exclude_keywords[0]"),
+            ('{"exclude_keywords": [""]}', "exclude_keywords[0]"),
+            ('{"exclude_keywords": ["　 "]}', "exclude_keywords[0]"),
+        )
+        with patch("release_monitor.ENV_PATH", spotify.settings.path), \
+             patch("release_monitor.logging.basicConfig"), patch("spotify_api.OPENER.open") as http, \
+             patch("release_monitor.sync_playlist") as sync:
+            for source, reason in cases:
+                with self.subTest(source=source), self.assertLogs("release_monitor", "ERROR") as logs:
+                    if source is None:
+                        self.keywords_path.unlink()
+                    else:
+                        self.keywords_path.write_text(source, encoding="utf-8")
+                    self.assertEqual(main([]), 1)
+                    self.assertTrue(any("exclude_keywords.json" in entry and reason in entry for entry in logs.output))
+            http.assert_not_called()
+            sync.assert_not_called()
+
+    def test_excluded_tracks_leave_open_slots_and_details_only_appear_in_dry_run_logs(self):
+        self.write_keywords(["Live", "Remix"])
+        spotify = self.make_spotify()
+        excluded = track("Excluded", name="Hot Song - Live Remix")
+        responses = {
+            "/me/following": {"artists": page({"id": "A"})},
+            "/artists/A/albums": page(album("Older", 1), album("Newest", 0), album("Oldest", 2)),
+            "/albums/Newest/tracks": page(excluded, *(track(f"T{i}") for i in range(49))),
+            "/albums/Older/tracks": page(track("Backfill", name="補充曲")),
+        }
+        spotify.call = Mock(side_effect=lambda method, path, **kwargs: responses[path])
+        with patch("release_monitor.datetime") as now, patch("release_monitor.sync_playlist") as sync:
+            now.now.return_value.date.return_value = TODAY
+            with self.assertLogs("release_monitor", "INFO") as dry_logs, redirect_stdout(StringIO()) as stdout:
+                run(spotify, dry_run=True)
+            sync.assert_not_called()
+            with self.assertLogs("release_monitor", "INFO") as normal_logs:
+                run(spotify, dry_run=False)
+
+        adopted = stdout.getvalue().splitlines()
+        self.assertEqual(len(adopted), 50)
+        self.assertIn("補充曲  https://open.spotify.com/track/Backfill", adopted[-1])
+        self.assertNotIn("Hot Song", stdout.getvalue())
+        self.assertEqual([item.uri for item in sync.call_args.args[1]][-1], "spotify:track:Backfill")
+        dry_output = "\n".join(dry_logs.output)
+        normal_output = "\n".join(normal_logs.output)
+        self.assertIn("除外曲 'Hot Song - Live Remix' / アーティスト 'A' / 一致キーワード 'Live', 'Remix'", dry_output)
+        self.assertNotIn("Hot Song", normal_output)
+        for output in (dry_output, normal_output):
+            self.assertIn("除外キーワードによる除外 1 曲", output)
+            self.assertIn("キーワード別の除外件数 'Live'=1, 'Remix'=1", output)
+            self.assertIn("プレイリスト対象 50 曲", output)
 
     def test_default_limit_is_fifty(self):
         spotify = self.make_spotify()
@@ -134,9 +241,8 @@ class ReleaseMonitorTests(unittest.TestCase):
             self.assertIn("https://open.spotify.com/track/Chosen", output.getvalue())
             run(spotify, dry_run=False)
             sync.assert_called_once_with(spotify, selected)
-        self.assertEqual([{key: value for key, value in entry.kwargs.items() if key != "album_page_loader"}
-                          for entry in collect.call_args_list],
-                         [{"lookback_days": 14, "max_tracks": 1}] * 2)
+        self.assertEqual([(entry.kwargs["lookback_days"], entry.kwargs["max_tracks"])
+                          for entry in collect.call_args_list], [(14, 1)] * 2)
 
     def test_missing_or_empty_settings_use_defaults(self):
         spotify = self.make_spotify("MAX_TRACKS=\n")

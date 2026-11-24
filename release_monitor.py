@@ -3,6 +3,7 @@
 import argparse
 from dataclasses import dataclass
 from datetime import date, datetime
+import json
 import logging
 from pathlib import Path
 import re
@@ -15,6 +16,7 @@ from spotify_api import ApiError, MonitorError, Settings, Spotify, authorize, ru
 
 
 ENV_PATH = Path(__file__).resolve().with_name(".env")
+EXCLUDE_KEYWORDS_PATH = ENV_PATH.with_name("exclude_keywords.json")
 TIME_ZONE = "Asia/Nicosia"
 DEFAULT_LOOKBACK_DAYS = 365
 DEFAULT_MAX_TRACKS = 50
@@ -32,6 +34,60 @@ class ReleaseTrack:
     artists: str
 
 
+def normalize_title(text):
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def reject_json_constant(value):
+    raise ValueError(f"JSON で使用できない値 {value}")
+
+
+class TitleExclusions:
+    def __init__(self, path, *, dry_run):
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_json_constant)
+        except FileNotFoundError:
+            raise MonitorError(f"除外キーワード設定ファイルが見つかりません。{path}") from None
+        except json.JSONDecodeError as error:
+            raise MonitorError(f"{path.name} の JSON が不正です（{error.lineno}行目、{error.colno}列目）。") from None
+        except (OSError, UnicodeError):
+            raise MonitorError(f"{path.name} を読み込めません。UTF-8 とファイルの権限を確認してください。") from None
+        except ValueError as error:
+            raise MonitorError(f"{path.name} の JSON が不正です（{error}）。") from None
+
+        keywords = config.get("exclude_keywords") if isinstance(config, dict) else None
+        if not isinstance(keywords, list):
+            raise MonitorError(f"{path.name} の exclude_keywords には文字列の配列を指定してください。")
+
+        patterns = {}
+        for index, keyword in enumerate(keywords):
+            normalized = normalize_title(keyword) if isinstance(keyword, str) else ""
+            if not normalized:
+                raise MonitorError(f"{path.name} の exclude_keywords[{index}] には空白以外を含む文字列を指定してください。")
+            literal = re.escape(normalized)
+            # Japanese titles can write version names without surrounding spaces.
+            if not re.search(r"[\u3040-\u30ff\u3400-\u9fff]", normalized):
+                literal = rf"(?<!\w){literal}(?!\w)"
+            patterns.setdefault(normalized, (keyword, re.compile(literal)))
+
+        self.patterns = tuple(patterns.values())
+        self.counts = {keyword: 0 for keyword, _ in self.patterns}
+        self.total = 0
+        self.dry_run = dry_run
+
+    def excludes(self, normalized_title, *, title, artists):
+        matches = [keyword for keyword, pattern in self.patterns if pattern.search(normalized_title)]
+        if not matches:
+            return False
+        self.total += 1
+        for keyword in matches:
+            self.counts[keyword] += 1
+        if self.dry_run:
+            LOG.info("除外曲 %r / アーティスト %r / 一致キーワード %s", title, artists,
+                     ", ".join(repr(keyword) for keyword in matches))
+        return True
+
+
 def positive_setting(settings, key, default):
     value = settings.get(key)
     if not value:
@@ -46,7 +102,7 @@ def positive_setting(settings, key, default):
 
 
 def collect_tracks(spotify, today, *, lookback_days=DEFAULT_LOOKBACK_DAYS, max_tracks=DEFAULT_MAX_TRACKS,
-                   album_page_loader=None):
+                   album_page_loader=None, title_exclusions=None):
     start = date.fromordinal(max(1, today.toordinal() - lookback_days + 1))
     artists = {
         artist["id"] for artist in spotify.items(
@@ -95,13 +151,18 @@ def collect_tracks(spotify, today, *, lookback_days=DEFAULT_LOOKBACK_DAYS, max_t
             if not re.fullmatch(r"spotify:track:[A-Za-z0-9]+", uri):
                 raise MonitorError("収集した楽曲の Spotify URI が不正です。")
             seen_uris.add(uri)
-            title = " ".join(unicodedata.normalize("NFKC", track["name"]).casefold().split())
+            track_name = track["name"]
+            title = normalize_title(track_name)
             title_and_artists = (title, frozenset(artist_ids))
             if title_and_artists in seen_titles_and_artists:
                 continue
             seen_titles_and_artists.add(title_and_artists)
-            tracks.append(ReleaseTrack(uri, albums[album_id], track["name"],
-                                       ", ".join(artist["name"] for artist in credits)))
+            artist_names = ", ".join(artist["name"] for artist in credits)
+            if title_exclusions is not None and title_exclusions.excludes(
+                title, title=track_name, artists=artist_names,
+            ):
+                continue
+            tracks.append(ReleaseTrack(uri, albums[album_id], track_name, artist_names))
             # All remaining tracks rank behind this one in the release order.
             if len(tracks) == max_tracks:
                 return tracks
@@ -182,15 +243,19 @@ def sync_playlist(spotify, tracks):
 
 def run(spotify, dry_run):
     try:
+        exclusions = TitleExclusions(EXCLUDE_KEYWORDS_PATH, dry_run=dry_run)
         lookback_days = positive_setting(spotify.settings, "LOOKBACK_DAYS", DEFAULT_LOOKBACK_DAYS)
         max_tracks = positive_setting(spotify.settings, "MAX_TRACKS", DEFAULT_MAX_TRACKS)
         with AlbumTrackCache(spotify) as cache:
             tracks = collect_tracks(spotify, datetime.now(ZoneInfo(TIME_ZONE)).date(),
                                     lookback_days=lookback_days, max_tracks=max_tracks,
-                                    album_page_loader=cache.load_page)
+                                    album_page_loader=cache.load_page, title_exclusions=exclusions)
     except (MonitorError, OSError, ValueError, KeyError, TypeError):
         LOG.error("収集を完了できなかったため、プレイリストは変更していません。")
         raise
+    LOG.info("除外キーワードによる除外 %s 曲", exclusions.total)
+    LOG.info("キーワード別の除外件数 %s",
+             ", ".join(f"{keyword!r}={count}" for keyword, count in exclusions.counts.items()) or "設定なし")
     LOG.info("収集完了。プレイリスト対象 %s 曲（上限 %s 曲）", len(tracks), max_tracks)
     if dry_run:
         for track in tracks:

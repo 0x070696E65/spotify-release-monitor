@@ -40,16 +40,24 @@ python3 release_monitor.py
 | `.env` の設定 | デフォルト | 用途 |
 | --- | --- | --- |
 | `LOOKBACK_DAYS` | `365` | `Asia/Nicosia` の当日を含む直近の日数 |
-| `MAX_TRACKS` | `50` | 重複排除後に同期する曲数の上限 |
+| `MAX_TRACKS` | `50` | 除外と重複排除の後に同期する曲数の上限 |
 
 どちらも1以上の整数を指定します。未設定または空欄の場合はデフォルトを使います。
 
 - フォロー中の全アーティストを取得し、各アーティストのリリースを `include_groups=single` の先頭1ページ（最大10件）まで調べます。日単位の発売日が設定され、`album_type=single` のリリースが対象です。複数曲入りのシングルでは、フォロー中のアーティストが1組以上クレジットされている収録曲をすべて候補にします。 [Spotify のアーティスト別リリース API](https://developer.spotify.com/documentation/web-api/reference/get-an-artists-albums)
-- 取得範囲内で発売日の新しい順に曲を調べ、トラック URI が同じ曲、または正規化した曲名とクレジットされたアーティスト ID の集合が一致する曲を重複として扱います。曲名の比較では Unicode の表記幅、大文字・小文字、空白の差を吸収します。同日のリリースはリリース ID 順、同じリリース内は Spotify が返す曲順です。重複排除後の `MAX_TRACKS` 曲（既定で50曲）に達した時点で取得を打ち切ります。`--dry-run` にも同じ曲が表示されます。
+- 取得範囲内で発売日の新しい順に曲を調べ、トラック URI が同じ曲、または正規化した曲名とクレジットされたアーティスト ID の集合が一致する曲を重複として扱います。同日のリリースはリリース ID 順、同じリリース内は Spotify が返す曲順です。除外と重複排除の後に `MAX_TRACKS` 曲（既定で50曲）に達した時点で取得を打ち切ります。除外で空いた枠は次の候補曲で補います。`--dry-run` にも同じ採用曲が表示されます。
 - アルバムの曲一覧をページ単位で `.album-tracks-cache.json` に48時間キャッシュし、有効なページは再取得せずに再利用します。`--dry-run` でもキャッシュを使います。このファイルは Git 管理対象外です。ローカルの Spotify 認証情報が変わると再利用範囲も切り替わります。収集中に Spotify がリフレッシュトークンを更新した場合は、同じ認証のキャッシュを引き継ぎます。
 - 収集に失敗すると、既存のプレイリストを維持して終了コード `1` を返します。収集が成功して対象が0曲の場合、プレイリストは空になります。終了時に API の合計回数と、HTTP メソッド・エンドポイント別の回数をログに記録します。トークン取得、失敗したリクエスト、再試行も集計に含まれます。
 - 曲の内容と順序が同じなら書き込みを省略します。100曲を超える更新は Spotify API の上限に合わせて複数回に分けます。更新の途中でエラーが発生した場合は、保存しておいた更新前の曲順へ復元を試みます。Spotify 側で通信障害や利用枠超過が続く場合、復元にも失敗する可能性があります。
 - 通常の HTTP `429` は `Retry-After` を尊重し、待機が300秒以内の場合は最大4回再試行します。`QUOTA_EXCEEDED` は再試行しません。収集中に発生した場合は即時終了し、プレイリストを維持します。複数回に分けた更新ですでに書き込みが始まっている場合は、更新前の内容への復元を試みます。Development Mode の利用枠は開発者アカウント内のアプリ間で共有されます。 [Spotify の利用枠とレート制限](https://developer.spotify.com/blog/2026-07-23-web-api-quota-updates)
+
+## タイトルで曲を除外する
+
+`release_monitor.py` と同じディレクトリにある `exclude_keywords.json` の `exclude_keywords` 配列を編集します。UTF-8 の JSON で、空白以外を含む文字列を指定してください。収集のたびに読み込むため、Python コードの変更は不要です。`{"exclude_keywords": []}` にするとフィルターが無効になります。ファイルが存在しないか内容が不正な場合は、エラーを表示してプレイリストを維持します。
+
+比較では Unicode NFKC 正規化により全角・半角の差を吸収し、大文字・小文字と連続する空白の違いも吸収します。キーワードは通常の文字列です。英語は単語の境界を確認するため、`Live` は `Song - Live Version` や `Song (Live)` に一致し、`Alive` は採用されます。日本語は `ライブ版` の中の `ライブ` にも一致します。表示する曲名と Spotify URI は元の値を使います。
+
+通常実行と `--dry-run` のログには、除外した曲数、キーワード別の件数、採用した曲数を記録します。複数キーワードに一致した曲は、除外曲数では1曲、キーワード別ではそれぞれ1件と数えます。`--dry-run` の標準出力には採用曲の一覧が出ます。除外曲の曲名、アーティスト名、一致キーワードは標準エラー出力のログで確認できます。
 
 ## Ubuntu VPS へのデプロイ
 
@@ -57,7 +65,7 @@ python3 release_monitor.py
 
 ```sh
 ssh ubuntu@vps.example 'install -d -m 700 ~/spotify-release-monitor'
-scp release_monitor.py spotify_api.py album_track_cache.py systemd/*.service systemd/*.timer ubuntu@vps.example:~/spotify-release-monitor/
+scp release_monitor.py spotify_api.py album_track_cache.py exclude_keywords.json systemd/*.service systemd/*.timer ubuntu@vps.example:~/spotify-release-monitor/
 scp -p .env ubuntu@vps.example:~/spotify-release-monitor/.env
 ssh ubuntu@vps.example
 ```
@@ -102,4 +110,4 @@ API が `403` を返す場合は、開発者アカウントの Premium、Dashboa
 python3 -m unittest discover -s tests
 ```
 
-模擬 API で取得範囲、重複排除、キャッシュの再利用と期限切れ、API 呼び出しの集計、利用枠超過時のプレイリスト保護を確認します。
+模擬 API で取得範囲、タイトル除外と件数、重複排除、キャッシュの再利用と期限切れ、API 呼び出しの集計、設定エラーと利用枠超過時のプレイリスト保護を確認します。
