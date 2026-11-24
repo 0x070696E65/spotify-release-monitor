@@ -1,8 +1,8 @@
 [Unit]
-Description=Update Spotify releases daily at 08:00 Asia/Nicosia
+Description=Update Spotify releases every Friday at 08:00 Asia/Nicosia
 
 [Timer]
-OnCalendar=*-*-* 08:00:00 Asia/Nicosia
+OnCalendar=Fri *-*-* 08:00:00 Asia/Nicosia
 AccuracySec=1s
 Persistent=true
 

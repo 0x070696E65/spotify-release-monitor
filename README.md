@@ -83,14 +83,14 @@ install -d ~/.config/systemd/user
 install -m 644 spotify-release-monitor.service spotify-release-monitor.timer ~/.config/systemd/user/
 sudo loginctl enable-linger "$(id -un)"
 systemctl --user daemon-reload
-systemd-analyze calendar '*-*-* 08:00:00 Asia/Nicosia'
+systemd-analyze calendar 'Fri *-*-* 08:00:00 Asia/Nicosia'
 systemctl --user start spotify-release-monitor.service
 systemctl --user enable --now spotify-release-monitor.timer
 systemctl --user list-timers spotify-release-monitor.timer
 journalctl --user -u spotify-release-monitor.service -n 50 --no-pager
 ```
 
-タイマーは VPS 自体のタイムゾーン設定にかかわらず、`Asia/Nicosia` の毎朝08:00に起動します。夏時間も反映されます。停止中に予定時刻を過ぎた場合は、タイマーの再起動時に実行します。 [systemd のカレンダー構文](https://www.freedesktop.org/software/systemd/man/latest/systemd.time.html) · [systemd.timer](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html)
+タイマーは VPS 自体のタイムゾーン設定にかかわらず、`Asia/Nicosia` の毎週金曜日08:00に起動します。夏時間も反映されます。停止中に予定時刻を過ぎた場合は、タイマーの再起動時に実行します。 [systemd のカレンダー構文](https://www.freedesktop.org/software/systemd/man/latest/systemd.time.html) · [systemd.timer](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html)
 
 ### VPS での再認証
 
