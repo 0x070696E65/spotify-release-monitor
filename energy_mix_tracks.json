@@ -1,0 +1,33 @@
+{
+  "tracks": [
+    {"artist": "ONE OK ROCK", "title": "完全感覚Dreamer"},
+    {"artist": "ONE OK ROCK", "title": "The Beginning"},
+    {"artist": "King Gnu", "title": "SPECIALZ", "track_id": "0GWNtMohuYUEHVZ40tcnHF"},
+    {"artist": "Vaundy", "title": "怪獣の花唄", "spotify_titles": ["Kaiju no Hanauta"], "track_id": "7dTW21YAJxnAOiUh7Rtu9S"},
+    {"artist": "Ado", "title": "逆光", "spotify_titles": ["逆光 - ウタ from ONE PIECE FILM RED", "Backlight", "Backlight - UTA from ONE PIECE FILM RED"]},
+    {"artist": "Ado", "title": "私は最強", "spotify_titles": ["私は最強 - ウタ from ONE PIECE FILM RED", "I’m invincible", "I’m invincible - UTA from ONE PIECE FILM RED"]},
+    {"artist": "Mrs. GREEN APPLE", "title": "青と夏"},
+    {"artist": "King Gnu", "title": "一途"},
+    {"artist": "King Gnu", "title": "飛行艇", "track_id": "3gzhVnO32u1W4BrUECGwt3"},
+    {"artist": "緑黄色社会", "spotify_artist": "Ryokuoushoku Shakai", "title": "sabotage"},
+    {"artist": "緑黄色社会", "spotify_artist": "Ryokuoushoku Shakai", "title": "キャラクター"},
+    {"artist": "MAN WITH A MISSION", "title": "Raise your flag"},
+    {"artist": "UVERworld", "title": "IMPACT"},
+    {"artist": "Ado", "title": "唱", "spotify_titles": ["Show"]},
+    {"artist": "Mrs. GREEN APPLE", "title": "インフェルノ"},
+    {"artist": "ポルノグラフィティ", "spotify_artist": "PornoGraffitti", "title": "THE DAY"},
+    {"artist": "Creepy Nuts", "title": "Bling-Bang-Bang-Born"},
+    {"artist": "tuki.", "title": "バブル", "spotify_titles": ["バブル - Bubble"]},
+    {"artist": "King Gnu", "title": "AIZO"},
+    {"artist": "緑黄色社会", "spotify_artist": "Ryokuoushoku Shakai", "title": "晴々"},
+    {"artist": "緑黄色社会", "spotify_artist": "Ryokuoushoku Shakai", "title": "Mela!"},
+    {"artist": "優里", "spotify_artist": "Yuuri", "title": "カーテンコール"},
+    {"artist": "HANA", "title": "ROSE", "album_id": "42rJ9A3HW7S2hWnkMNZIwk"},
+    {"artist": "MY FIRST STORY", "title": "不可逆リプレイス", "spotify_titles": ["不可逆リプレイス - Fukagyaku Replace"], "track_id": "2wCTFpIMACCmBiTyjgDdaZ"},
+    {"artist": "ONE OK ROCK", "title": "Re:make"},
+    {"artist": "LiSA", "title": "ADAMAS"},
+    {"artist": "[Alexandros]", "title": "ワタリドリ"},
+    {"artist": "SUPER BEAVER", "title": "突破口"},
+    {"artist": "Ado", "title": "リベリオン", "spotify_titles": ["Rebellion"]}
+  ]
+}
